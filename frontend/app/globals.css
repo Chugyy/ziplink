@@ -1,0 +1,124 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  /* Shadow color — green-tinted for this palette */
+  --shadow-color: 155 30% 8%;
+
+  /* Warm shadows */
+  --shadow-xs: 0 1px 2px hsl(var(--shadow-color) / 0.08);
+  --shadow-sm: 0 1px 3px hsl(var(--shadow-color) / 0.12), 0 1px 2px hsl(var(--shadow-color) / 0.06);
+  --shadow-md: 0 4px 6px hsl(var(--shadow-color) / 0.12), 0 2px 4px hsl(var(--shadow-color) / 0.06);
+  --shadow-lg: 0 10px 15px hsl(var(--shadow-color) / 0.12), 0 4px 6px hsl(var(--shadow-color) / 0.06);
+
+  /* Button relief — 3D effect */
+  --shadow-relief:
+    0 1px 3px hsl(var(--shadow-color) / 0.20),
+    0 4px 8px hsl(var(--shadow-color) / 0.12),
+    inset 0 1px 0 rgba(255,255,255,0.08);
+  --shadow-relief-hover:
+    0 2px 4px hsl(var(--shadow-color) / 0.25),
+    0 6px 12px hsl(var(--shadow-color) / 0.15),
+    inset 0 1px 0 rgba(255,255,255,0.12);
+  --shadow-relief-active:
+    0 1px 1px hsl(var(--shadow-color) / 0.20),
+    inset 0 1px 2px hsl(var(--shadow-color) / 0.15);
+
+  /* Primary color nuances for gradient */
+  --primary-light: #22ffaa;
+  --primary-base: #00ff88;
+  --primary-dark: #00cc6a;
+}
+
+body {
+  color: #ffffff;
+  background: #0a0a0a;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Glass card ── */
+.glass {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+  box-shadow: var(--shadow-sm);
+}
+
+.glass:hover {
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: var(--shadow-md);
+}
+
+/* ── Grid pattern background ── */
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(0, 255, 136, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 255, 136, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ── Button relief 3D (primary) ── */
+.btn-relief {
+  background: linear-gradient(180deg, var(--primary-light) 0%, var(--primary-dark) 100%);
+  box-shadow: var(--shadow-relief);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.15);
+  transition: transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1),
+              box-shadow 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.btn-relief:hover {
+  background: linear-gradient(180deg, var(--primary-base) 0%, var(--primary-dark) 100%);
+  box-shadow: var(--shadow-relief-hover);
+  transform: translateY(-1px);
+}
+
+.btn-relief:active {
+  background: linear-gradient(180deg, var(--primary-dark) 0%, var(--primary-dark) 100%);
+  box-shadow: var(--shadow-relief-active);
+  transform: scale(0.97);
+}
+
+/* ── Green glow (additive on top of relief) ── */
+.glow {
+  box-shadow:
+    var(--shadow-relief),
+    0 0 20px rgba(0, 255, 136, 0.15),
+    0 0 60px rgba(0, 255, 136, 0.05);
+}
+
+.glow:hover {
+  box-shadow:
+    var(--shadow-relief-hover),
+    0 0 30px rgba(0, 255, 136, 0.25),
+    0 0 80px rgba(0, 255, 136, 0.1);
+}
+
+/* ── Warm shadows utilities ── */
+.shadow-warm-sm { box-shadow: var(--shadow-sm); }
+.shadow-warm-md { box-shadow: var(--shadow-md); }
+.shadow-warm-lg { box-shadow: var(--shadow-lg); }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0a0a0a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}

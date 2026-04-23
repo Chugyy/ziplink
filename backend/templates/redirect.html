@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Redirecting...</title>
+    <!-- noscript fallback -->
+    <noscript>
+        <meta http-equiv="refresh" content="0;url={{ fallback_url }}">
+    </noscript>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            min-height: 100dvh;
+            background: #0a0a0a;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', 'Segoe UI', system-ui, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        .container {
+            text-align: center;
+            padding: 2rem;
+            max-width: 400px;
+            width: 100%;
+        }
+
+        /* ── Auto-redirect state (regular browsers) ── */
+        .auto-state .spinner {
+            width: 40px; height: 40px;
+            border: 3px solid rgba(255,255,255,0.1);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 1.5rem;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .auto-state .text { font-size: 1.1rem; opacity: 0.8; }
+
+        /* ── Button state (in-app browsers) ── */
+        .button-state { display: none; }
+        .app-icon { font-size: 3rem; margin-bottom: 1rem; }
+        .title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+        .subtitle {
+            font-size: 0.9rem;
+            color: rgba(255,255,255,0.5);
+            margin-bottom: 2rem;
+            line-height: 1.4;
+        }
+
+        .open-btn {
+            display: block;
+            width: 100%;
+            padding: 16px 24px;
+            background: #fff;
+            color: #0a0a0a;
+            border: none;
+            border-radius: 14px;
+            font-size: 1.05rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            text-align: center;
+            transition: transform 0.15s, opacity 0.15s;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .open-btn:active {
+            transform: scale(0.97);
+            opacity: 0.9;
+        }
+
+        .web-link {
+            display: inline-block;
+            margin-top: 1.2rem;
+            color: rgba(255,255,255,0.4);
+            text-decoration: none;
+            font-size: 0.85rem;
+            padding: 8px 16px;
+        }
+        .web-link:hover { color: rgba(255,255,255,0.7); }
+    </style>
+</head>
+<body>
+    <div class="container">
+
+        <!-- STATE 1: Auto-redirect (regular browser, not in-app) -->
+        <div class="auto-state" id="autoState">
+            <div class="spinner"></div>
+            {% if app_name %}
+            <p class="text">Opening in <strong>{{ app_name }}</strong>...</p>
+            {% else %}
+            <p class="text">Redirecting...</p>
+            {% endif %}
+        </div>
+
+        <!-- STATE 2: Button tap (in-app browsers like Telegram, Instagram, etc.) -->
+        <div class="button-state" id="buttonState">
+            <div class="app-icon">{{ app_icon }}</div>
+            <p class="title">Open in {{ app_name }}</p>
+            <p class="subtitle" id="subtitleText">
+                {% if in_app_source %}
+                {{ in_app_source }}'s browser can't open apps directly.<br>
+                Tap below to open in <strong>{{ app_name }}</strong>.
+                {% else %}
+                Tap below to open in the app.
+                {% endif %}
+            </p>
+
+            <a class="open-btn" id="openBtn" href="#" onclick="handleOpenApp(); return false;">
+                Open {{ app_name }}
+            </a>
+        </div>
+
+    </div>
+
+    <script>
+    (function() {
+        // ── Config injected by server ──
+        var config = {
+            iosScheme: "{{ ios_scheme or '' }}",
+            androidIntent: "{{ android_intent or '' }}",
+            fallbackUrl: "{{ fallback_url }}",
+            isInAppBrowser: {{ 'true' if is_in_app_browser else 'false' }},
+            platform: "{{ platform }}"
+        };
+
+        var isAndroid = config.platform === "android";
+        var isIOS = config.platform === "ios";
+        var fallbackTimer;
+
+        function goFallback() {
+            window.location.replace(config.fallbackUrl);
+        }
+
+        function cancelFallback() {
+            if (fallbackTimer) {
+                clearTimeout(fallbackTimer);
+                fallbackTimer = null;
+            }
+        }
+
+        // Cancel fallback if page becomes hidden (= app opened successfully)
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) cancelFallback();
+        });
+        window.addEventListener('pagehide', function() { cancelFallback(); });
+
+        // ── IN-APP BROWSER: show button, let user tap ──
+        if (config.isInAppBrowser) {
+            document.getElementById('autoState').style.display = 'none';
+            document.getElementById('buttonState').style.display = 'block';
+
+            // On iOS: set the button href to the direct URL.
+            // The WebView's Universal Links handling will open the app.
+            // (x-web-search:// escapes to Safari but loses Universal Links)
+            if (isIOS) {
+                var btn = document.getElementById('openBtn');
+                if (btn) btn.href = config.fallbackUrl;
+            }
+
+            return; // Wait for user tap
+        }
+
+        // ── REGULAR BROWSER: auto-redirect ──
+        if (isAndroid && config.androidIntent) {
+            // Android Chrome/Firefox: intent:// works natively
+            window.location.replace(config.androidIntent);
+            fallbackTimer = setTimeout(goFallback, 2500);
+
+        } else if (isIOS && config.iosScheme) {
+            // iOS Safari: try URI scheme directly
+            window.location = config.iosScheme;
+            fallbackTimer = setTimeout(goFallback, 2000);
+
+        } else {
+            goFallback();
+        }
+    })();
+
+    /**
+     * THE KEY FUNCTION — handles the button tap in in-app browsers.
+     *
+     * Strategy:
+     * - iOS in-app browser: use x-web-search:// to escape to Safari.
+     *   Once in Safari, Universal Links for YouTube/Instagram/TikTok
+     *   activate automatically (those apps have AASA files).
+     *
+     * - Android in-app browser: use googlechrome://navigate to escape
+     *   to Chrome. Once in Chrome, Android App Links for YouTube etc.
+     *   activate automatically (those apps have assetlinks.json).
+     *
+     * - Fallback: if escape schemes don't work, try direct URI scheme
+     *   (may work with user gesture), then fallback to web.
+     */
+    function handleOpenApp() {
+        var config_local = {
+            iosScheme: "{{ ios_scheme or '' }}",
+            androidIntent: "{{ android_intent or '' }}",
+            fallbackUrl: "{{ fallback_url }}"
+        };
+
+        var isAndroid = /Android/i.test(navigator.userAgent);
+        var isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+        if (isIOS) {
+            // ── iOS: Direct link — Universal Links in WebView handle it ──
+            // The WebView recognizes YouTube/Instagram/TikTok URLs and
+            // triggers Universal Links, which opens the native app.
+            window.location = config_local.fallbackUrl;
+
+        } else if (isAndroid) {
+            // ── Android: Multi-strategy deep link ──
+
+            // Strategy 1: Set the <a> href to intent:// so the tap
+            // itself triggers intent resolution (WebViews respect <a> taps)
+            if (config_local.androidIntent) {
+                var btn = document.getElementById('openBtn');
+                if (btn) btn.href = config_local.androidIntent;
+                // Also try via window.location for immediate effect
+                window.location = config_local.androidIntent;
+            }
+
+            // Strategy 2: if intent didn't work (WebView intercepted it),
+            // try iframe trick — some WebViews allow intent:// via iframes
+            setTimeout(function() {
+                if (!document.hidden && config_local.androidIntent) {
+                    var iframe = document.createElement('iframe');
+                    iframe.style.display = 'none';
+                    iframe.src = config_local.androidIntent;
+                    document.body.appendChild(iframe);
+                    setTimeout(function() { document.body.removeChild(iframe); }, 100);
+                }
+            }, 500);
+
+            // Strategy 3: escape to Chrome
+            setTimeout(function() {
+                if (!document.hidden) {
+                    var chromeUrl = "googlechrome://navigate?url=" + encodeURIComponent(config_local.fallbackUrl);
+                    window.location = chromeUrl;
+                }
+            }, 1200);
+
+            // Strategy 4: web fallback
+            setTimeout(function() {
+                if (!document.hidden) {
+                    window.location.replace(config_local.fallbackUrl);
+                }
+            }, 3000);
+
+        } else {
+            // Unknown platform
+            window.location.replace(config_local.fallbackUrl);
+        }
+    }
+    </script>
+</body>
+</html>
