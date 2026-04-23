@@ -26,9 +26,6 @@ CREATE TABLE IF NOT EXISTS links (
     UNIQUE(user_id, slug)
 );
 
-CREATE INDEX IF NOT EXISTS idx_links_slug ON links(slug);
-CREATE INDEX IF NOT EXISTS idx_links_user_id ON links(user_id);
-
 CREATE TABLE IF NOT EXISTS clicks (
     id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     link_id      uuid REFERENCES links(id) ON DELETE CASCADE,
@@ -45,10 +42,7 @@ CREATE TABLE IF NOT EXISTS clicks (
     app_target   varchar(50)
 );
 
-CREATE INDEX IF NOT EXISTS idx_clicks_link_id ON clicks(link_id);
-CREATE INDEX IF NOT EXISTS idx_clicks_clicked_at ON clicks(clicked_at);
-
--- Migration: add columns if tables already exist
+-- Migration: add columns if tables already exist (MUST run before indexes on new columns)
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='username') THEN
@@ -62,6 +56,12 @@ BEGIN
         ALTER TABLE links DROP CONSTRAINT links_slug_key;
     END IF;
 END $$;
+
+-- Indexes (after migration so columns exist)
+CREATE INDEX IF NOT EXISTS idx_links_slug ON links(slug);
+CREATE INDEX IF NOT EXISTS idx_links_user_id ON links(user_id);
+CREATE INDEX IF NOT EXISTS idx_clicks_link_id ON clicks(link_id);
+CREATE INDEX IF NOT EXISTS idx_clicks_clicked_at ON clicks(clicked_at);
 """
 
 
