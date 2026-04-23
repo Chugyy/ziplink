@@ -10,8 +10,18 @@ export function setToken(token: string) {
   localStorage.setItem("token", token);
 }
 
+export function getUsername(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("username");
+}
+
+export function setUsername(username: string) {
+  localStorage.setItem("username", username);
+}
+
 export function clearToken() {
   localStorage.removeItem("token");
+  localStorage.removeItem("username");
 }
 
 export function isAuthenticated(): boolean {
@@ -24,6 +34,7 @@ export async function login(
 ): Promise<AuthResponse> {
   const res = (await api.login(email, password)) as AuthResponse;
   setToken(res.token);
+  setUsername(res.user.username);
   return res;
 }
 
@@ -33,6 +44,7 @@ export async function signup(
 ): Promise<AuthResponse> {
   const res = (await api.signup(email, password)) as AuthResponse;
   setToken(res.token);
+  setUsername(res.user.username);
   return res;
 }
 

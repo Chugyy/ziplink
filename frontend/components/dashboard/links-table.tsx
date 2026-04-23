@@ -13,8 +13,10 @@ import { api } from "@/lib/api";
 import { Link as LinkType, LinkListResponse } from "@/lib/types";
 import { CopyButton } from "@/components/shared/copy-button";
 import { CreateLinkModal } from "./create-link-modal";
+import { useAuth } from "@/hooks/use-auth";
 
 export function LinksTable() {
+  const { username } = useAuth();
   const [links, setLinks] = useState<LinkType[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -132,7 +134,7 @@ export function LinksTable() {
                   <td className="px-5 py-4">
                     <div className="flex items-center gap-2">
                       <code className="text-primary font-mono text-sm">
-                        /{link.slug}
+                        /{username}/{link.slug}
                       </code>
                       <CopyButton text={link.short_url} />
                     </div>

@@ -55,10 +55,13 @@ export interface LinkListResponse {
   total: number;
 }
 
+export interface User {
+  id: string;
+  email: string;
+  username: string;
+}
+
 export interface AuthResponse {
   token: string;
-  user: {
-    id: string;
-    email: string;
-  };
+  user: User;
 }

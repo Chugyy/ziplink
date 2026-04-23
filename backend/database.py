@@ -11,19 +11,23 @@ CREATE TABLE IF NOT EXISTS users (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     email         varchar(255) UNIQUE NOT NULL,
     password_hash varchar(255) NOT NULL,
+    username      varchar(50) UNIQUE,
     created_at    timestamptz DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS links (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    slug            varchar(20) UNIQUE NOT NULL,
+    user_id         uuid REFERENCES users(id) ON DELETE CASCADE,
+    slug            varchar(50) NOT NULL,
     destination_url text NOT NULL,
     title           varchar(255),
     created_at      timestamptz DEFAULT now(),
-    is_active       boolean DEFAULT true
+    is_active       boolean DEFAULT true,
+    UNIQUE(user_id, slug)
 );
 
 CREATE INDEX IF NOT EXISTS idx_links_slug ON links(slug);
+CREATE INDEX IF NOT EXISTS idx_links_user_id ON links(user_id);
 
 CREATE TABLE IF NOT EXISTS clicks (
     id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -43,6 +47,21 @@ CREATE TABLE IF NOT EXISTS clicks (
 
 CREATE INDEX IF NOT EXISTS idx_clicks_link_id ON clicks(link_id);
 CREATE INDEX IF NOT EXISTS idx_clicks_clicked_at ON clicks(clicked_at);
+
+-- Migration: add columns if tables already exist
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='username') THEN
+        ALTER TABLE users ADD COLUMN username varchar(50) UNIQUE;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='links' AND column_name='user_id') THEN
+        ALTER TABLE links ADD COLUMN user_id uuid REFERENCES users(id) ON DELETE CASCADE;
+    END IF;
+    -- Drop old unique constraint on slug alone if it exists
+    IF EXISTS (SELECT 1 FROM information_schema.table_constraints WHERE constraint_name='links_slug_key' AND table_name='links') THEN
+        ALTER TABLE links DROP CONSTRAINT links_slug_key;
+    END IF;
+END $$;
 """
 
 

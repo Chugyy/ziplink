@@ -18,7 +18,14 @@ from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import get_pool, close_pool, init_db
-from auth import AuthRequest, signup, login, get_current_user
+from auth import (
+    AuthRequest,
+    UpdateUsernameRequest,
+    signup,
+    login,
+    get_current_user,
+    update_username,
+)
 from deep_links import (
     get_deep_link,
     detect_platform,
@@ -56,7 +63,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Ziplink",
     description="Smart Link Tracker with Deep Linking",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -67,6 +74,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _build_short_url(username: str, slug: str) -> str:
+    return f"{BASE_URL}/{username}/{slug}"
 
 
 # ─── Auth Routes ─────────────────────────────────────────────
@@ -88,6 +99,11 @@ async def auth_me(request: Request):
     return user
 
 
+@app.patch("/api/auth/username")
+async def auth_update_username(request: Request, req: UpdateUsernameRequest):
+    return await update_username(request, req)
+
+
 def generate_slug(length: int = 7) -> str:
     """Generate a random URL-safe slug."""
     chars = string.ascii_letters + string.digits
@@ -98,21 +114,29 @@ def generate_slug(length: int = 7) -> str:
 
 
 @app.post("/api/links", response_model=LinkResponse)
-async def create_link(req: CreateLinkRequest):
+async def create_link(req: CreateLinkRequest, request: Request):
     """Create a new tracked short link."""
+    user = await get_current_user(request)
     pool = await get_pool()
+
+    import uuid
+    user_id = uuid.UUID(user["id"])
+    username = user["username"]
 
     slug = req.custom_slug or generate_slug()
 
-    # Check slug uniqueness
-    existing = await pool.fetchrow("SELECT id FROM links WHERE slug = $1", slug)
+    # Check slug uniqueness within user's links
+    existing = await pool.fetchrow(
+        "SELECT id FROM links WHERE user_id = $1 AND slug = $2", user_id, slug
+    )
     if existing:
         if req.custom_slug:
             raise HTTPException(status_code=409, detail=f"Slug '{slug}' already taken")
-        # Retry with new slug
         for _ in range(5):
             slug = generate_slug()
-            existing = await pool.fetchrow("SELECT id FROM links WHERE slug = $1", slug)
+            existing = await pool.fetchrow(
+                "SELECT id FROM links WHERE user_id = $1 AND slug = $2", user_id, slug
+            )
             if not existing:
                 break
         else:
@@ -120,10 +144,11 @@ async def create_link(req: CreateLinkRequest):
 
     row = await pool.fetchrow(
         """
-        INSERT INTO links (slug, destination_url, title)
-        VALUES ($1, $2, $3)
+        INSERT INTO links (user_id, slug, destination_url, title)
+        VALUES ($1, $2, $3, $4)
         RETURNING id, slug, destination_url, title, created_at, is_active
         """,
+        user_id,
         slug,
         req.destination_url,
         req.title,
@@ -134,7 +159,7 @@ async def create_link(req: CreateLinkRequest):
         slug=row["slug"],
         destination_url=row["destination_url"],
         title=row["title"],
-        short_url=f"{BASE_URL}/{row['slug']}",
+        short_url=_build_short_url(username, row["slug"]),
         created_at=row["created_at"],
         is_active=row["is_active"],
         total_clicks=0,
@@ -143,11 +168,17 @@ async def create_link(req: CreateLinkRequest):
 
 @app.get("/api/links", response_model=LinkListResponse)
 async def list_links(
+    request: Request,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
-    """List all links with click counts."""
+    """List all links for the current user."""
+    user = await get_current_user(request)
     pool = await get_pool()
+
+    import uuid
+    user_id = uuid.UUID(user["id"])
+    username = user["username"]
 
     rows = await pool.fetch(
         """
@@ -158,14 +189,16 @@ async def list_links(
             FROM clicks
             GROUP BY link_id
         ) c ON c.link_id = l.id
+        WHERE l.user_id = $1
         ORDER BY l.created_at DESC
-        LIMIT $1 OFFSET $2
+        LIMIT $2 OFFSET $3
         """,
+        user_id,
         limit,
         offset,
     )
 
-    total = await pool.fetchval("SELECT COUNT(*) FROM links")
+    total = await pool.fetchval("SELECT COUNT(*) FROM links WHERE user_id = $1", user_id)
 
     links = [
         LinkResponse(
@@ -173,7 +206,7 @@ async def list_links(
             slug=r["slug"],
             destination_url=r["destination_url"],
             title=r["title"],
-            short_url=f"{BASE_URL}/{r['slug']}",
+            short_url=_build_short_url(username, r["slug"]),
             created_at=r["created_at"],
             is_active=r["is_active"],
             total_clicks=r["total_clicks"],
@@ -185,42 +218,39 @@ async def list_links(
 
 
 @app.get("/api/links/{link_id}/stats", response_model=LinkStatsResponse)
-async def get_link_stats(link_id: str):
+async def get_link_stats(link_id: str, request: Request):
     """Get detailed stats for a link."""
+    user = await get_current_user(request)
     pool = await get_pool()
 
-    # Try by slug first (most common), then by UUID
+    import uuid
+    user_id = uuid.UUID(user["id"])
+    username = user["username"]
+
+    # Try by slug first, then by UUID
     link = await pool.fetchrow(
         """
         SELECT l.*, COALESCE(c.click_count, 0) as total_clicks
         FROM links l
-        LEFT JOIN (
-            SELECT link_id, COUNT(*) as click_count
-            FROM clicks
-            GROUP BY link_id
-        ) c ON c.link_id = l.id
-        WHERE l.slug = $1
+        LEFT JOIN (SELECT link_id, COUNT(*) as click_count FROM clicks GROUP BY link_id) c ON c.link_id = l.id
+        WHERE l.slug = $1 AND l.user_id = $2
         """,
         link_id,
+        user_id,
     )
 
     if not link:
-        # Try by UUID
         try:
-            import uuid
             link_uuid = uuid.UUID(link_id)
             link = await pool.fetchrow(
                 """
                 SELECT l.*, COALESCE(c.click_count, 0) as total_clicks
                 FROM links l
-                LEFT JOIN (
-                    SELECT link_id, COUNT(*) as click_count
-                    FROM clicks
-                    GROUP BY link_id
-                ) c ON c.link_id = l.id
-                WHERE l.id = $1
+                LEFT JOIN (SELECT link_id, COUNT(*) as click_count FROM clicks GROUP BY link_id) c ON c.link_id = l.id
+                WHERE l.id = $1 AND l.user_id = $2
                 """,
                 link_uuid,
+                user_id,
             )
         except (ValueError, Exception):
             pass
@@ -229,12 +259,7 @@ async def get_link_stats(link_id: str):
         raise HTTPException(status_code=404, detail="Link not found")
 
     clicks_rows = await pool.fetch(
-        """
-        SELECT * FROM clicks
-        WHERE link_id = $1
-        ORDER BY clicked_at DESC
-        LIMIT 100
-        """,
+        "SELECT * FROM clicks WHERE link_id = $1 ORDER BY clicked_at DESC LIMIT 100",
         link["id"],
     )
 
@@ -255,7 +280,6 @@ async def get_link_stats(link_id: str):
         for r in clicks_rows
     ]
 
-    # Aggregate stats
     stats_data = await pool.fetchrow(
         """
         SELECT
@@ -272,38 +296,21 @@ async def get_link_stats(link_id: str):
         link["id"],
     )
 
-    # Top browsers
     top_browsers = await pool.fetch(
-        """
-        SELECT browser, COUNT(*) as count
-        FROM clicks WHERE link_id = $1 AND browser IS NOT NULL
-        GROUP BY browser ORDER BY count DESC LIMIT 5
-        """,
+        "SELECT browser, COUNT(*) as count FROM clicks WHERE link_id = $1 AND browser IS NOT NULL GROUP BY browser ORDER BY count DESC LIMIT 5",
         link["id"],
     )
 
-    # Top referers
     top_referers = await pool.fetch(
-        """
-        SELECT referer, COUNT(*) as count
-        FROM clicks WHERE link_id = $1 AND referer IS NOT NULL AND referer != ''
-        GROUP BY referer ORDER BY count DESC LIMIT 5
-        """,
+        "SELECT referer, COUNT(*) as count FROM clicks WHERE link_id = $1 AND referer IS NOT NULL AND referer != '' GROUP BY referer ORDER BY count DESC LIMIT 5",
         link["id"],
     )
 
     stats = {
         "total_clicks": stats_data["total"],
         "unique_visitors": stats_data["unique_ips"],
-        "devices": {
-            "mobile": stats_data["mobile"],
-            "desktop": stats_data["desktop"],
-            "tablet": stats_data["tablet"],
-        },
-        "platforms": {
-            "ios": stats_data["ios"],
-            "android": stats_data["android"],
-        },
+        "devices": {"mobile": stats_data["mobile"], "desktop": stats_data["desktop"], "tablet": stats_data["tablet"]},
+        "platforms": {"ios": stats_data["ios"], "android": stats_data["android"]},
         "deep_link_opens": stats_data["deep_links"],
         "top_browsers": {r["browser"]: r["count"] for r in top_browsers},
         "top_referers": {r["referer"]: r["count"] for r in top_referers},
@@ -315,7 +322,7 @@ async def get_link_stats(link_id: str):
             slug=link["slug"],
             destination_url=link["destination_url"],
             title=link["title"],
-            short_url=f"{BASE_URL}/{link['slug']}",
+            short_url=_build_short_url(username, link["slug"]),
             created_at=link["created_at"],
             is_active=link["is_active"],
             total_clicks=link["total_clicks"],
@@ -326,12 +333,19 @@ async def get_link_stats(link_id: str):
 
 
 @app.patch("/api/links/{link_id}", response_model=LinkResponse)
-async def update_link(link_id: str, req: UpdateLinkRequest):
+async def update_link(link_id: str, req: UpdateLinkRequest, request: Request):
     """Update a link's title, destination, or active status."""
+    user = await get_current_user(request)
     pool = await get_pool()
 
+    import uuid
+    user_id = uuid.UUID(user["id"])
+    username = user["username"]
+
     link = await pool.fetchrow(
-        "SELECT * FROM links WHERE id::text = $1 OR slug = $1", link_id
+        "SELECT * FROM links WHERE (id::text = $1 OR slug = $1) AND user_id = $2",
+        link_id,
+        user_id,
     )
     if not link:
         raise HTTPException(status_code=404, detail="Link not found")
@@ -360,16 +374,14 @@ async def update_link(link_id: str, req: UpdateLinkRequest):
         *values,
     )
 
-    click_count = await pool.fetchval(
-        "SELECT COUNT(*) FROM clicks WHERE link_id = $1", link["id"]
-    )
+    click_count = await pool.fetchval("SELECT COUNT(*) FROM clicks WHERE link_id = $1", link["id"])
 
     return LinkResponse(
         id=row["id"],
         slug=row["slug"],
         destination_url=row["destination_url"],
         title=row["title"],
-        short_url=f"{BASE_URL}/{row['slug']}",
+        short_url=_build_short_url(username, row["slug"]),
         created_at=row["created_at"],
         is_active=row["is_active"],
         total_clicks=click_count,
@@ -377,17 +389,22 @@ async def update_link(link_id: str, req: UpdateLinkRequest):
 
 
 @app.get("/api/stats/overview", response_model=OverviewStatsResponse)
-async def get_overview_stats():
+async def get_overview_stats(request: Request):
     """Aggregate stats for the dashboard header."""
+    user = await get_current_user(request)
     pool = await get_pool()
+
+    import uuid
+    user_id = uuid.UUID(user["id"])
 
     row = await pool.fetchrow(
         """
         SELECT
-            (SELECT COUNT(*) FROM links) as total_links,
-            (SELECT COUNT(*) FROM clicks) as total_clicks,
-            (SELECT COUNT(*) FROM clicks WHERE is_deep_link = true) as deep_link_opens
-        """
+            (SELECT COUNT(*) FROM links WHERE user_id = $1) as total_links,
+            (SELECT COUNT(*) FROM clicks c JOIN links l ON c.link_id = l.id WHERE l.user_id = $1) as total_clicks,
+            (SELECT COUNT(*) FROM clicks c JOIN links l ON c.link_id = l.id WHERE l.user_id = $1 AND c.is_deep_link = true) as deep_link_opens
+        """,
+        user_id,
     )
 
     return OverviewStatsResponse(
@@ -398,10 +415,19 @@ async def get_overview_stats():
 
 
 @app.delete("/api/links/{link_id}")
-async def delete_link(link_id: str):
+async def delete_link(link_id: str, request: Request):
     """Delete a link and all its clicks."""
+    user = await get_current_user(request)
     pool = await get_pool()
-    result = await pool.execute("DELETE FROM links WHERE id::text = $1 OR slug = $1", link_id)
+
+    import uuid
+    user_id = uuid.UUID(user["id"])
+
+    result = await pool.execute(
+        "DELETE FROM links WHERE (id::text = $1 OR slug = $1) AND user_id = $2",
+        link_id,
+        user_id,
+    )
     if result == "DELETE 0":
         raise HTTPException(status_code=404, detail="Link not found")
     return {"status": "deleted"}
@@ -410,25 +436,33 @@ async def delete_link(link_id: str):
 # ─── Redirect Route (THE CORE) ──────────────────────────────
 
 
-@app.get("/{slug}")
-async def redirect_link(slug: str, request: Request):
+@app.get("/{username}/{slug}")
+async def redirect_link(username: str, slug: str, request: Request):
     """
-    The main redirect endpoint.
+    The main redirect endpoint: /{username}/{slug}
 
-    1. Look up the link by slug
-    2. Log the click with device info
-    3. On mobile: serve a smart redirect page that tries deep link first
-    4. On desktop: direct 302 redirect
+    1. Look up the user by username
+    2. Look up the link by slug within that user
+    3. Log the click with device info
+    4. On mobile: serve a smart redirect page that tries deep link first
+    5. On desktop: direct 302 redirect
     """
     # Skip API and docs paths
-    if slug in ("api", "docs", "openapi.json", "redoc", "favicon.ico"):
+    if username in ("api", "docs", "openapi.json", "redoc", "favicon.ico"):
         raise HTTPException(status_code=404)
 
     pool = await get_pool()
 
+    # Find user by username
+    user = await pool.fetchrow("SELECT id FROM users WHERE username = $1", username)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Find link by slug within user
     link = await pool.fetchrow(
-        "SELECT id, destination_url, is_active FROM links WHERE slug = $1",
+        "SELECT id, destination_url, is_active FROM links WHERE slug = $1 AND user_id = $2",
         slug,
+        user["id"],
     )
 
     if not link:
@@ -449,7 +483,7 @@ async def redirect_link(slug: str, request: Request):
     browser = detect_browser(user_agent)
     app_target = identify_app(destination)
 
-    # Get deep link (now takes full user_agent for in-app browser detection)
+    # Get deep link
     dl_info = get_deep_link(destination, user_agent)
     has_deep_link = dl_info["has_deep_link"]
 
@@ -471,7 +505,6 @@ async def redirect_link(slug: str, request: Request):
             app_target,
         )
     except Exception as e:
-        # Don't fail the redirect because of logging errors
         print(f"Error logging click: {e}")
 
     # Desktop → direct redirect

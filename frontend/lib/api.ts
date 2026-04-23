@@ -53,6 +53,12 @@ export const api = {
 
   me: () => request("/api/auth/me"),
 
+  updateUsername: (username: string) =>
+    request("/api/auth/username", {
+      method: "PATCH",
+      body: JSON.stringify({ username }),
+    }),
+
   // Links
   createLink: (data: {
     destination_url: string;
