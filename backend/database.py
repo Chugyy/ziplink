@@ -85,7 +85,21 @@ async def init_db():
     """Run schema bootstrap (idempotent)."""
     p = await get_pool()
     async with p.acquire() as conn:
-        await conn.execute(INIT_SQL)
+        try:
+            await conn.execute(INIT_SQL)
+            print("Database initialized successfully")
+        except Exception as e:
+            print(f"WARNING: init_db failed: {e}")
+            # Try running statements individually to pinpoint the issue
+            for i, stmt in enumerate(INIT_SQL.split(";")):
+                stmt = stmt.strip()
+                if not stmt or stmt.startswith("--"):
+                    continue
+                try:
+                    await conn.execute(stmt + ";")
+                except Exception as inner_e:
+                    print(f"  Statement {i} failed: {inner_e}")
+                    print(f"  SQL: {stmt[:200]}")
 
 
 async def get_pool() -> asyncpg.Pool:
