@@ -441,7 +441,26 @@ async def delete_link(link_id: str, request: Request):
     return {"status": "deleted"}
 
 
-# ─── Redirect Route (THE CORE) ──────────────────────────────
+# ─── Health check ────────────────────────────────────────────
+
+
+@app.get("/api/health")
+async def health():
+    """Health check - always returns 200 so Swarm doesn't kill us.
+    DB status is informational only."""
+    db_ok = False
+    db_error = None
+    try:
+        pool = await get_pool()
+        result = await pool.fetchval("SELECT 1")
+        db_ok = result == 1
+    except Exception as e:
+        db_error = str(e)
+        print(f"Health check DB error: {e}")
+    return {"status": "ok", "db": db_ok, "db_error": db_error}
+
+
+# ─── Redirect Route (THE CORE — must be LAST) ───────────────
 
 
 @app.get("/{username}/{slug}")
@@ -538,25 +557,6 @@ async def redirect_link(username: str, slug: str, request: Request):
 
     # Mobile but no deep link mapping → direct redirect
     return RedirectResponse(url=destination, status_code=302)
-
-
-# ─── Health check ────────────────────────────────────────────
-
-
-@app.get("/api/health")
-async def health():
-    """Health check - always returns 200 so Swarm doesn't kill us.
-    DB status is informational only."""
-    db_ok = False
-    db_error = None
-    try:
-        pool = await get_pool()
-        result = await pool.fetchval("SELECT 1")
-        db_ok = result == 1
-    except Exception as e:
-        db_error = str(e)
-        print(f"Health check DB error: {e}")
-    return {"status": "ok", "db": db_ok, "db_error": db_error}
 
 
 if __name__ == "__main__":
