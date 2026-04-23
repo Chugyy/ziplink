@@ -54,13 +54,18 @@ templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await get_pool()
     try:
+        await get_pool()
         await init_db()
+        print("Database connected and initialized")
     except Exception as e:
-        print(f"WARNING: Database init failed: {e}")
+        print(f"WARNING: Database startup failed: {e}")
+        print("App will start anyway — DB-dependent routes will fail gracefully")
     yield
-    await close_pool()
+    try:
+        await close_pool()
+    except Exception:
+        pass
 
 
 app = FastAPI(
@@ -540,9 +545,18 @@ async def redirect_link(username: str, slug: str, request: Request):
 
 @app.get("/api/health")
 async def health():
-    pool = await get_pool()
-    result = await pool.fetchval("SELECT 1")
-    return {"status": "ok", "db": result == 1}
+    """Health check - always returns 200 so Swarm doesn't kill us.
+    DB status is informational only."""
+    db_ok = False
+    db_error = None
+    try:
+        pool = await get_pool()
+        result = await pool.fetchval("SELECT 1")
+        db_ok = result == 1
+    except Exception as e:
+        db_error = str(e)
+        print(f"Health check DB error: {e}")
+    return {"status": "ok", "db": db_ok, "db_error": db_error}
 
 
 if __name__ == "__main__":
