@@ -102,9 +102,35 @@ async def init_db():
                     print(f"  SQL: {stmt[:200]}")
 
 
+async def _ensure_database_exists():
+    """Create the target database if it doesn't exist (connects to 'postgres' admin db)."""
+    host = os.getenv("DB_HOST", "localhost")
+    port = os.getenv("DB_PORT", "5432")
+    name = os.getenv("DB_NAME", "tapit-db")
+    user = os.getenv("DB_USER", "hugo")
+    pwd = os.getenv("DB_PASSWORD", "")
+    auth = f"{user}:{pwd}" if pwd else user
+    admin_dsn = f"postgresql://{auth}@{host}:{port}/postgres"
+
+    try:
+        conn = await asyncpg.connect(dsn=admin_dsn)
+        try:
+            exists = await conn.fetchval(
+                "SELECT 1 FROM pg_database WHERE datname = $1", name
+            )
+            if not exists:
+                await conn.execute(f'CREATE DATABASE "{name}"')
+                print(f"Created database '{name}'")
+        finally:
+            await conn.close()
+    except Exception as e:
+        print(f"WARNING: could not ensure database exists: {e}")
+
+
 async def get_pool() -> asyncpg.Pool:
     global pool
     if pool is None:
+        await _ensure_database_exists()
         pool = await asyncpg.create_pool(
             dsn=_build_dsn(),
             min_size=2,
